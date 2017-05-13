@@ -89,7 +89,6 @@ string format(SysTime dt, string formatString)
  */
 SysTime parse(string data, string formatString, immutable(TimeZone) defaultTimeZone = null)
 {
-    auto tz = defaultTimeZone ? defaultTimeZone : UTC();
     auto a = Interpreter(data);
     auto res = a.parse(formatString, defaultTimeZone);
     if (res.error)
@@ -110,7 +109,6 @@ bool tryParse(
         out SysTime dt,
         immutable(TimeZone) defaultTimeZone = null)
 {
-    auto tz = defaultTimeZone ? defaultTimeZone : utc;
     auto a = Interpreter(data);
     auto res = a.parse(formatString, defaultTimeZone);
     if (res.error)
@@ -218,7 +216,7 @@ struct Interpreter
 
     Result parse(string formatString, immutable(TimeZone) defaultTimeZone)
     {
-        auto tz = defaultTimeZone ? defaultTimeZone : utc;
+        auto tz = defaultTimeZone is null ? utc : defaultTimeZone;
         bool inPercent;
         foreach (size_t i, dchar c; formatString)
         {
@@ -275,7 +273,7 @@ struct Interpreter
         }
         auto dt = SysTime(
                 DateTime(year, month, dayOfMonth, hour24, minute, second),
-                defaultTimeZone);
+                tz);
         return Result(dt, null, data);
     }
 
@@ -725,5 +723,9 @@ unittest
     writefln("isoish: %s", isoish);
     assert(isoish == "2017-05-03 14:31:57 +0000", isoish);
     auto parsed = isoish.parse(isoishFmt);
+    assert(parsed.timezone !is null);
+    writefln("tz name: %s | %s | %s", parsed.timezone.name, parsed.timezone.stdName,
+            parsed.timezone.dstName);
+    assert(parsed.timezone == UTC());
     assert(parsed == dt, parsed.format(isoishFmt));
 }
