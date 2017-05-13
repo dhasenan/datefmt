@@ -46,6 +46,87 @@ import std.string;
 import std.utf : codeLength;
 alias to = std.conv.to;
 
+
+/**
+ * Format the given datetime with the given format string.
+ */
+string format(SysTime dt, string formatString)
+{
+    Appender!string ap;
+    bool inPercent;
+    foreach (i, c; formatString)
+    {
+        if (inPercent)
+        {
+            inPercent = false;
+            interpretIntoString(ap, dt, c);
+        }
+        else if (c == '%')
+        {
+            inPercent = true;
+        }
+        else
+        {
+            ap ~= c;
+        }
+    }
+    return ap.data;
+}
+
+
+/**
+ * Parse the given datetime string with the given format string.
+ *
+ * This tries rather hard to produce a reasonable result. If the format string doesn't describe an
+ * unambiguous point time, the result will be a date that satisfies the inputs and should generally
+ * be the earliest such date. However, that is not guaranteed.
+ *
+ * For instance:
+ * ---
+ * SysTime time = parse("%d", "21");
+ * writeln(time);  // 0000-01-21T00:00:00.000000Z
+ * ---
+ */
+SysTime parse(string data, string formatString, immutable(TimeZone) defaultTimeZone = null)
+{
+    auto tz = defaultTimeZone ? defaultTimeZone : UTC();
+    auto a = Interpreter(data);
+    auto res = a.parse(formatString, defaultTimeZone);
+    if (res.error)
+    {
+        throw new Exception(res.error ~ " around " ~ res.remaining);
+    }
+    return res.dt;
+}
+
+/**
+ * Try to parse the input string according to the given pattern.
+ *
+ * Return: true to indicate success; false to indicate failure
+ */
+bool tryParse(
+        string data,
+        string formatString,
+        out SysTime dt,
+        immutable(TimeZone) defaultTimeZone = null)
+{
+    auto tz = defaultTimeZone ? defaultTimeZone : utc;
+    auto a = Interpreter(data);
+    auto res = a.parse(formatString, defaultTimeZone);
+    if (res.error)
+    {
+        return false;
+    }
+    dt = res.dt;
+    return true;
+}
+
+private:
+
+
+immutable(TimeZone) utc;
+static this() { utc = UTC(); }
+
 enum weekdayNames = [
     "Sunday",
     "Monday",
@@ -96,52 +177,15 @@ enum monthAbbrev = [
     "Dec",
 ];
 
-/**
- * Format the given datetime with the given format string.
- */
-string format(SysTime dt, string formatString)
+struct Result
 {
-    Appender!string ap;
-    bool inPercent;
-    foreach (i, c; formatString)
-    {
-        if (inPercent)
-        {
-            interpretIntoString(ap, dt, c);
-        }
-        else if (c == '%')
-        {
-            inPercent = true;
-        }
-        else
-        {
-            ap ~= c;
-        }
-    }
-    return ap.data;
+    SysTime dt;
+    string error;
+    string remaining;
+    string remainingFormat;
 }
 
-
-/**
- * Parse the given datetime string with the given format string.
- *
- * This tries rather hard to produce a reasonable result. If the format string doesn't describe an
- * unambiguous point time, the result will be a date that satisfies the inputs and should generally
- * be the earliest such date. However, that is not guaranteed.
- *
- * For instance:
- * ---
- * SysTime time = parse("%d", "21");
- * writeln(time);  // 0000-01-21T00:00:00.000000Z
- * ---
- */
-SysTime parse(string data, string formatString, immutable(TimeZone) defaultTimeZone = null)
-{
-    return SysTime.init;
-}
-
-private:
-
+// TODO support wstring, dstring
 struct Interpreter
 {
     this(string data)
@@ -172,15 +216,24 @@ struct Interpreter
     enum AMPM { AM, PM, None };
     AMPM amPm = AMPM.None;
 
-    SysTime parse(string formatString, immutable(TimeZone) defaultTimeZone = null)
+    Result parse(string formatString, immutable(TimeZone) defaultTimeZone)
     {
-        auto tz = defaultTimeZone ? defaultTimeZone : UTC();
+        auto tz = defaultTimeZone ? defaultTimeZone : utc;
         bool inPercent;
         foreach (size_t i, dchar c; formatString)
         {
             if (inPercent)
             {
-                interpretFromString(c);
+                inPercent = false;
+                if (!interpretFromString(c))
+                {
+                    auto remainder = data;
+                    if (remainder.length > 15)
+                    {
+                        remainder = remainder[0..15];
+                    }
+                    return Result(SysTime.init, "unexpected value", data, formatString[i..$]);
+                }
             }
             else if (c == '%')
             {
@@ -189,41 +242,41 @@ struct Interpreter
             else
             {
                 // TODO non-ASCII
-                data = data[1..$];
+                auto b = data;
+                foreach (size_t i, dchar dc; b)
+                {
+                    data = b[i..$];
+                    if (i > 0)
+                    {
+                        break;
+                    }
+                    if (c != dc)
+                    {
+                        return Result(SysTime.init, "unexpected literal", data, formatString[i..$]);
+                    }
+                }
             }
         }
-        SysTime st;
-        if (year)
-        {
-            st.year = year;
-        }
-        else
-        {
-            st.year = century * 100 + yearOfCentury;
-        }
 
-        st.month = month;
-        st.day = dayOfMonth;
+        if (!year)
+        {
+            year = century * 100 + yearOfCentury;
+        }
         if (hour12)
         {
             if (amPm == AMPM.PM)
             {
-                auto h = hour12 + 12;
-                if (h == 24) h = 0;
-                st.hour = h;
+                hour24 = (hour12 + 12) % 24;
             }
             else
             {
-                st.hour = hour12;
+                hour24 = hour12;
             }
         }
-        else
-        {
-            st.hour = hour24;
-        }
-        st.minute = minute;
-        st.second = second;
-        return st;
+        auto dt = SysTime(
+                DateTime(year, month, dayOfMonth, hour24, minute, second),
+                defaultTimeZone);
+        return Result(dt, null, data);
     }
 
     bool interpretFromString(dchar c)
@@ -301,7 +354,8 @@ struct Interpreter
                 return parseInt!(x => dayOfMonth = x)(data);
             case 'H':
             case 'k':
-                return parseInt!(x => hour24 = x)(data);
+                auto h = parseInt!(x => hour24 = x)(data);
+                return h;
             case 'h':
             case 'I':
             case 'l':
@@ -367,7 +421,7 @@ struct Interpreter
                 data = data[end..$];
                 return true;
             case 'S':
-                return parseInt!(x => seconds = x)(data);
+                return parseInt!(x => second = x)(data);
             case 'T':
                 return interpretFromString('H') &&
                     pop(':') &&
@@ -423,7 +477,7 @@ struct Interpreter
                 // I'll assume that this is followed by a space or something.
                 return parseInt!(x => isoWeek = x)(data);
             default:
-                throw new Exception("unrecognized control character %s");
+                throw new Exception("unrecognized control character %" ~ c.to!string);
         }
     }
 
@@ -438,27 +492,27 @@ struct Interpreter
     }
 }
 
-    bool parseInt(alias setter, int length = 2)(ref string data)
+bool parseInt(alias setter, int length = 2)(ref string data)
+{
+    if (data.length < length)
     {
-        if (data.length < length)
-        {
-            return false;
-        }
-        auto c = data[0..length];
-        data = data[length..$].strip;
-        int v;
-        try
-        {
-            v = c.to!int;
-
-        }
-        catch (ConvException e)
-        {
-            return false;
-        }
-        cast(void)setter(c.to!int);
-        return true;
+        return false;
     }
+    auto c = data[0..length].strip;
+    data = data[length..$];
+    int v;
+    try
+    {
+        v = c.to!int;
+
+    }
+    catch (ConvException e)
+    {
+        return false;
+    }
+    cast(void)setter(c.to!int);
+    return true;
+}
 
 void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
 {
@@ -658,4 +712,18 @@ void pad(ref Appender!string ap, string s, char pad, uint length)
         ap ~= pad;
     }
     ap ~= s;
+}
+
+unittest
+{
+    import std.stdio;
+    auto dt = SysTime(
+            DateTime(2017, 5, 3, 14, 31, 57),
+            UTC());
+    auto isoishFmt = "%Y-%m-%d %H:%M:%S %z";
+    auto isoish = dt.format(isoishFmt);
+    writefln("isoish: %s", isoish);
+    assert(isoish == "2017-05-03 14:31:57 +0000", isoish);
+    auto parsed = isoish.parse(isoishFmt);
+    assert(parsed == dt, parsed.format(isoishFmt));
 }
