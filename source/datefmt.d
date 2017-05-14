@@ -2,38 +2,36 @@
   * datefmt provides parsing and formatting for std.datetime objects.
   *
   * The format is taken from strftime:
-  *    %a     The abbreviated name of the day of the week according to the current locale.
-  *    %A     The full name of the day of the week according to the current locale.
-  *    %b     The abbreviated month name according to the current locale.
-  *    %B     The full month name according to the current locale.
+  *    %a     The abbreviated name of the day of the week.
+  *    %A     The full name of the day of the week.
+  *    %b     The abbreviated month name.
+  *    %B     The full month name.
   *    %C     The century number (year/100) as a 2-digit integer.
   *    %d     The day of the month as a decimal number (range 01 to 31).
-  *    %e     Like %d, the day of the month as a decimal number, but a leading zero is replaced by a space.
+  *    %e     Like %d, the day of the month as a decimal number, but space padded.
   *    %F     Equivalent to %Y-%m-%d (the ISO 8601 date format).
   *    %h     The hour as a decimal number using a 12-hour clock (range 01 to 12).
   *    %H     The hour as a decimal number using a 24-hour clock (range 00 to 23).
   *    %I     The hour as a decimal number using a 12-hour clock (range 00 to 23).
   *    %j     The day of the year as a decimal number (range 001 to 366).
-  *    %k     The hour (24-hour clock) as a decimal number (range 0 to 23); single digits are preceded by a blank.  (See also %H.)  (TZ)
-  *    %l     The hour (12-hour clock) as a decimal number (range 1 to 12); single digits are preceded by a blank.  (See also %I.)  (TZ)
+  *    %k     The hour (24-hour clock) as a decimal number (range 0 to 23), space padded.
+  *    %l     The hour (12-hour clock) as a decimal number (range 1 to 12), space padded.
   *    %m     The month as a decimal number (range 01 to 12).
   *    %M     The minute as a decimal number (range 00 to 59).
-  *    %p     Either "AM" or "PM" according to the given time value, or the corresponding strings for the current locale.  Noon is treated as "PM" and midnight as "AM".
-  *    %P     Like %p but in lowercase: "am" or "pm" or a corresponding string for the current locale. (GNU)
-  *    %r     The time in a.m. or p.m. notation.  In the POSIX locale this is equivalent to %I:%M:%S %p.
-  *    %R     The time in 24-hour notation (%H:%M).  For a version including the seconds, see %T below.
-  *    %s     The number of seconds since the Epoch, 1970-01-01 00:00:00 +0000 (UTC). (TZ)
-  *    %S     The second as a decimal number (range 00 to 60).  (The range is up to 60 to allow for occasional leap seconds.)
-  *    %T     The time in 24-hour notation (%H:%M:%S).
-  *    %u     The day of the week as a decimal, range 1 to 7, Monday being 1.  See also %w.
-  *    %V     The  ISO 8601 week number (see NOTES) of the current year as a decimal number, range 01 to 53, where week 1 is the first week that has at least 4 days in the new year.  See
-  *           also %U and %W.
-  *    %w     The day of the week as a decimal, range 0 to 6, Sunday being 0.  See also %u.
-  *    %W     The week number of the current year as a decimal number, range 00 to 53, starting with the first Monday as the first day of week 01.
+  *    %p     "AM" / "PM" (midnight is AM; noon is PM).
+  *    %P     "am" / "pm" (midnight is AM; noon is PM).
+  *    %r     Equivalent to "%I:%M:%S %p".
+  *    %R     Equivalent to "%H:%M".
+  *    %s     The number of seconds since the Epoch, 1970-01-01 00:00:00 +0000 (UTC).
+  *    %S     The second as a decimal number (range 00 to 60).
+  *    %T     Equivalent to "%H:%M:%S".
+  *    %u     The day of the week as a decimal, range 1 to 7, Monday being 1 (formatting only).
+  *    %V     The ISO 8601 week number (formatting only).
+  *    %w     The day of the week as a decimal, range 0 to 6, Sunday being 0 (formatting only).
   *    %y     The year as a decimal number without a century (range 00 to 99).
-  *    %Y     The year as a decimal number including the century.
+  *    %Y     The year as a decimal number including the century, minimum 4 digits.
   *    %z     The +hhmm or -hhmm numeric timezone (that is, the hour and minute offset from UTC).
-  *    %Z     The timezone name or abbreviation.
+  *    %Z     The timezone name or abbreviation. Formatting only.
   *    %%     A literal '%' character.
   */
 module datefmt;
@@ -87,13 +85,21 @@ string format(SysTime dt, string formatString)
  * writeln(time);  // 0000-01-21T00:00:00.000000Z
  * ---
  */
-SysTime parse(string data, string formatString, immutable(TimeZone) defaultTimeZone = null)
+SysTime parse(
+        string data,
+        string formatString,
+        immutable(TimeZone) defaultTimeZone = null,
+        bool allowTrailingData = false)
 {
     auto a = Interpreter(data);
     auto res = a.parse(formatString, defaultTimeZone);
     if (res.error)
     {
         throw new Exception(res.error ~ " around " ~ res.remaining);
+    }
+    if (!allowTrailingData && res.remaining.length > 0)
+    {
+        throw new Exception("trailing data: " ~ res.remaining);
     }
     return res.dt;
 }
@@ -119,6 +125,20 @@ bool tryParse(
     return true;
 }
 
+enum RFC1123FORMAT = "%a, %d %b %Y %H:%M:%S GMT";
+
+/** Parse an RFC1123 date. */
+SysTime parseRFC1123(string data, bool allowTrailingData = false)
+{
+    return parse(data, RFC1123FORMAT, UTC(), allowTrailingData);
+}
+
+/** Produce an RFC1123 date string from a SysTime. */
+string toRFC1123(SysTime date)
+{
+    return format(date.toUTC(), RFC1123FORMAT);
+}
+
 private:
 
 
@@ -138,9 +158,9 @@ enum weekdayNames = [
 enum weekdayAbbrev = [
     "Sun",
     "Mon",
-    "Tues",
+    "Tue",
     "Wed",
-    "Thurs",
+    "Thu",
     "Fri",
     "Sat"
 ];
@@ -241,11 +261,13 @@ struct Interpreter
             {
                 // TODO non-ASCII
                 auto b = data;
+                bool endedEarly = false;
                 foreach (size_t i, dchar dc; b)
                 {
                     data = b[i..$];
                     if (i > 0)
                     {
+                        endedEarly = true;
                         break;
                     }
                     if (c != dc)
@@ -253,6 +275,7 @@ struct Interpreter
                         return Result(SysTime.init, "unexpected literal", data, formatString[i..$]);
                     }
                 }
+                if (!endedEarly) data = "";
             }
         }
 
@@ -664,6 +687,7 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
             ap.pad(dt.year.to!string, '0', 4);
             return;
         case 'z':
+            import std.math : abs;
             auto d = dt.utcOffset;
             if (d < dur!"seconds"(0))
             {
@@ -673,8 +697,9 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
             {
                 ap ~= '+';
             }
-            ap.pad(d.total!"hours"().to!string, '0', 2);
-            ap.pad((d.total!"minutes"() % 60).to!string, '0', 2);
+            auto minutes = abs(d.total!"minutes");
+            ap.pad((minutes / 60).to!string, '0', 2);
+            ap.pad((minutes % 60).to!string, '0', 2);
             return;
         case 'Z':
             if (dt.dstInEffect)
@@ -728,4 +753,11 @@ unittest
             parsed.timezone.dstName);
     assert(parsed.timezone == UTC());
     assert(parsed == dt, parsed.format(isoishFmt));
+}
+
+unittest
+{
+    auto formatted = "Thu, 04 Sep 2014 06:42:22 GMT";
+    auto dt = parseRFC1123(formatted);
+    assert(dt == SysTime(DateTime(2014, 9, 4, 6, 42, 22), UTC()), dt.toISOString());
 }
