@@ -1,5 +1,5 @@
 /**
-  * datefmt provides parsing and formatting for std.datetime objects.
+  * datetimeformat provides parsing and formatting for std.datetime objects.
   *
   * The format is taken from strftime:
   *    %a     The abbreviated name of the day of the week.
@@ -34,7 +34,7 @@
   *    %Z     The timezone name or abbreviation. Formatting only.
   *    %%     A literal '%' character.
   */
-module datefmt;
+module datetimeformat;
 
 import core.time;
 import std.array;
@@ -745,12 +745,9 @@ unittest
             UTC());
     auto isoishFmt = "%Y-%m-%d %H:%M:%S %z";
     auto isoish = dt.format(isoishFmt);
-    writefln("isoish: %s", isoish);
     assert(isoish == "2017-05-03 14:31:57 +0000", isoish);
     auto parsed = isoish.parse(isoishFmt);
     assert(parsed.timezone !is null);
-    writefln("tz name: %s | %s | %s", parsed.timezone.name, parsed.timezone.stdName,
-            parsed.timezone.dstName);
     assert(parsed.timezone == UTC());
     assert(parsed == dt, parsed.format(isoishFmt));
 }
