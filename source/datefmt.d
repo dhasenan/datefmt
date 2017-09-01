@@ -1,5 +1,5 @@
 /**
-  * datetimeformat provides parsing and formatting for std.datetime objects.
+  * datefmt provides parsing and formatting for std.datetime objects.
   *
   * The format is taken from strftime:
   *    %a     The abbreviated name of the day of the week.
@@ -34,7 +34,7 @@
   *    %Z     The timezone name or abbreviation. Formatting only.
   *    %%     A literal '%' character.
   */
-module datetimeformat;
+module datefmt;
 
 import core.time;
 import std.array;
