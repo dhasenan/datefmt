@@ -27,4 +27,4 @@ produce something sensible out of it. This is for stricter parsing.
 
 ## Dub
 
-Add a dependency on `"datefmt": "~>0.1.0"`.
+Add a dependency on `"datefmt": "~>1.0.0"`.

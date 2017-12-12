@@ -9,7 +9,10 @@
   *    %C     The century number (year/100) as a 2-digit integer.
   *    %d     The day of the month as a decimal number (range 01 to 31).
   *    %e     Like %d, the day of the month as a decimal number, but space padded.
+  *    %f     Fractional seconds. Will parse any precision and emit six decimal places.
   *    %F     Equivalent to %Y-%m-%d (the ISO 8601 date format).
+  *    %g     Milliseconds of the second.
+  *    %G     Nanoseconds of the second.
   *    %h     The hour as a decimal number using a 12-hour clock (range 01 to 12).
   *    %H     The hour as a decimal number using a 24-hour clock (range 00 to 23).
   *    %I     The hour as a decimal number using a 12-hour clock (range 00 to 23).
@@ -32,7 +35,11 @@
   *    %Y     The year as a decimal number including the century, minimum 4 digits.
   *    %z     The +hhmm or -hhmm numeric timezone (that is, the hour and minute offset from UTC).
   *    %Z     The timezone name or abbreviation. Formatting only.
+  *    %+     The numeric offset, or 'Z' for UTC. This is common with ISO8601 timestamps.
   *    %%     A literal '%' character.
+  *
+  * Timezone support is awkward. When time formats contain a GMT offset, that is honored. Otherwise,
+  * datefmt recognizes a subset of the timezone names defined in RFC1123.
   */
 module datefmt;
 
@@ -44,6 +51,30 @@ import std.string;
 import std.utf : codeLength;
 alias to = std.conv.to;
 
+
+/**
+ * A Format is the platonic ideal of a specific format string.
+ *
+ * For datetime formats such as RFC1123 or ISO8601, there are many potential formats.
+ * Like '2017-01-01' is a valid ISO8601 date. So is '2017-01-01T15:31:00'.
+ * A Format object can describe all allomorphs of a format.
+ */
+struct Format
+{
+    /// The canonical format, to be used when formatting a datetime.
+    string primaryFormat;
+    /// Other formats that count as part of this Format, used for parsing.
+    string[] formatOptions;
+}
+
+
+/**
+ * Format the given datetime with the given Format.
+ */
+string format(SysTime dt, const Format fmt)
+{
+    return format(dt, fmt.primaryFormat);
+}
 
 /**
  * Format the given datetime with the given format string.
@@ -87,6 +118,37 @@ string format(SysTime dt, string formatString)
  */
 SysTime parse(
         string data,
+        const Format fmt,
+        immutable(TimeZone) defaultTimeZone = null,
+        bool allowTrailingData = false)
+{
+    SysTime st;
+    foreach (f; fmt.formatOptions)
+    {
+        if (tryParse(data, cast(string)f, st, defaultTimeZone))
+        {
+            return st;
+        }
+    }
+    return parse(data, fmt.primaryFormat, defaultTimeZone, allowTrailingData);
+}
+
+
+/**
+ * Parse the given datetime string with the given format string.
+ *
+ * This tries rather hard to produce a reasonable result. If the format string doesn't describe an
+ * unambiguous point time, the result will be a date that satisfies the inputs and should generally
+ * be the earliest such date. However, that is not guaranteed.
+ *
+ * For instance:
+ * ---
+ * SysTime time = parse("%d", "21");
+ * writeln(time);  // 0000-01-21T00:00:00.000000Z
+ * ---
+ */
+SysTime parse(
+        string data,
         string formatString,
         immutable(TimeZone) defaultTimeZone = null,
         bool allowTrailingData = false)
@@ -111,6 +173,27 @@ SysTime parse(
  */
 bool tryParse(
         string data,
+        const Format fmt,
+        out SysTime dt,
+        immutable(TimeZone) defaultTimeZone = null)
+{
+    foreach (f; fmt.formatOptions)
+    {
+        if (tryParse(data, cast(string)f, dt, defaultTimeZone))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Try to parse the input string according to the given pattern.
+ *
+ * Return: true to indicate success; false to indicate failure
+ */
+bool tryParse(
+        string data,
         string formatString,
         out SysTime dt,
         immutable(TimeZone) defaultTimeZone = null)
@@ -125,7 +208,50 @@ bool tryParse(
     return true;
 }
 
-enum RFC1123FORMAT = "%a, %d %b %Y %H:%M:%S GMT";
+import std.algorithm : map, cartesianProduct, joiner;
+import std.array : array;
+
+/**
+  * A Format suitable for RFC1123 dates.
+  *
+  * For instance, `Sun, 02 Jan 2004 15:31:10 GMT` is a valid RFC1123 date.
+  */
+immutable Format RFC1123FORMAT = {
+    primaryFormat: "%a, %d %b %Y %H:%M:%S %Z",
+    formatOptions:
+        // According to the spec, day-of-week is optional.
+        // Timezone can be specified in a few ways.
+        // In the wild, we have a number of variants. Like the day of week can be abbreviated or
+        // full. Likewise with the month.
+        cartesianProduct(
+                ["%a, ", "%A, ", ""],
+                ["%d "],
+                ["%b", "%B"],
+                [" %Y %H:%M:%S "],
+                ["%Z", "%z", "%.%.%.", "%.%.", "%."]
+                )
+        .map!(x => joiner([x.tupleof], "").array.to!string)
+        .array
+};
+
+/**
+  * A Format suitable for ISO8601 dates.
+  *
+  * For instance, `2010-01-15 06:17:21.015Z` is a valid ISO8601 date.
+  */
+immutable Format ISO8601FORMAT = {
+    primaryFormat: "%Y-%m-%dT%H:%M:%S.%f%+",
+    formatOptions: [
+        "%Y-%m-%dT%H:%M:%S.%f%+",
+        "%Y-%m-%d %H:%M:%S.%f%+",
+        "%Y-%m-%dT%H:%M:%S%+",
+        "%Y-%m-%d %H:%M:%S%+",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d",
+    ]
+};
 
 /** Parse an RFC1123 date. */
 SysTime parseRFC1123(string data, bool allowTrailingData = false)
@@ -137,6 +263,18 @@ SysTime parseRFC1123(string data, bool allowTrailingData = false)
 string toRFC1123(SysTime date)
 {
     return format(date.toUTC(), RFC1123FORMAT);
+}
+
+/** Parse an ISO8601 date. */
+SysTime parseISO8601(string data, bool allowTrailingData = false)
+{
+    return parse(data, ISO8601FORMAT, UTC(), allowTrailingData);
+}
+
+/** Produce an ISO8601 date string from a SysTime. */
+string toISO8601(SysTime date)
+{
+    return format(date.toUTC(), ISO8601FORMAT);
 }
 
 private:
@@ -233,10 +371,12 @@ struct Interpreter
     long epochSecond;
     enum AMPM { AM, PM, None };
     AMPM amPm = AMPM.None;
+    Duration fracSecs;
+    immutable(TimeZone)* tz;
 
     Result parse(string formatString, immutable(TimeZone) defaultTimeZone)
     {
-        auto tz = defaultTimeZone is null ? utc : defaultTimeZone;
+        tz = defaultTimeZone is null ? &utc : &defaultTimeZone;
         bool inPercent;
         foreach (size_t i, dchar c; formatString)
         {
@@ -296,7 +436,8 @@ struct Interpreter
         }
         auto dt = SysTime(
                 DateTime(year, month, dayOfMonth, hour24, minute, second),
-                tz);
+                tzOffset ? new immutable SimpleTimeZone(tzOffset) : *tz);
+        dt += fracSecs;
         return Result(dt, null, data);
     }
 
@@ -304,6 +445,14 @@ struct Interpreter
     {
         switch (c)
         {
+            case '.':
+                // TODO unicodes
+                if (data.length >= 1)
+                {
+                    data = data[1..$];
+                    return true;
+                }
+                return false;
             case 'a':
                 foreach (i, m; weekdayAbbrev)
                 {
@@ -352,6 +501,34 @@ struct Interpreter
                 return parseInt!(x => dayOfMonth = x)(data);
             case 'e':
                 return parseInt!(x => dayOfMonth = x)(data);
+            case 'g':
+                return parseInt!(x => fracSecs = x.msecs)(data);
+            case 'G':
+                return parseInt!(x => fracSecs = x.nsecs)(data);
+            case 'f':
+                size_t end = data.length;
+                foreach (i, cc; data)
+                {
+                    if ('0' > cc || '9' < cc)
+                    {
+                        end = i;
+                        break;
+                    }
+                }
+                auto fs = data[0..end].to!ulong;
+                data = data[end..$];
+                while (end < 7)
+                {
+                    end++;
+                    fs *= 10;
+                }
+                while (end > 7)
+                {
+                    end--;
+                    fs /= 10;
+                }
+                this.fracSecs = fs.hnsecs;
+                return true;
             case 'F':
                 auto dash1 = data.indexOf('-');
                 if (dash1 <= 0) return false;
@@ -470,6 +647,13 @@ struct Interpreter
                 data = data[end..$];
                 return true;
             case 'z':
+            case '+':
+                if (pop('Z'))  // for ISO8601
+                {
+                    tzOffset = 0.seconds;
+                    return true;
+                }
+
                 int sign = 0;
                 if (pop('-'))
                 {
@@ -489,14 +673,15 @@ struct Interpreter
                 tzOffset = dur!"minutes"(sign * (minute + 60 * hour));
                 return true;
             case 'Z':
-                // Oh god.
-                // This could be something like America/Los_Angeles.
-                // Or UTC.
-                // Or EST5EDT.
-                // And it could be followed by anything. Like the format might be:
-                //  "%Z%a" -> America/Los_AngelesMon
-                // I'll assume that this is followed by a space or something.
-                return parseInt!(x => isoWeek = x)(data);
+                foreach (i, v; canonicalZones)
+                {
+                    if (data.startsWith(v.name))
+                    {
+                        tz = &canonicalZones[i].zone;
+                        break;
+                    }
+                }
+                return false;
             default:
                 throw new Exception("unrecognized control character %" ~ c.to!string);
         }
@@ -513,6 +698,49 @@ struct Interpreter
     }
 }
 
+struct CanonicalZone
+{
+    string name;
+    immutable(TimeZone) zone;
+}
+// array so we can control iteration order -- longest first
+CanonicalZone[] canonicalZones;
+shared static this()
+{
+    version (Posix)
+    {
+        auto utc = PosixTimeZone.getTimeZone("Etc/UTC");
+        auto est = PosixTimeZone.getTimeZone("America/New_York");
+        auto cst = PosixTimeZone.getTimeZone("America/Boise");
+        auto mst = PosixTimeZone.getTimeZone("America/Chicago");
+        auto pst = PosixTimeZone.getTimeZone("America/Los_Angeles");
+    }
+    else
+    {
+        auto utc = WindowsTimeZone.getTimeZone("UTC");
+        auto est = WindowsTimeZone.getTimeZone("EST");
+        auto cst = WindowsTimeZone.getTimeZone("CST");
+        auto mst = WindowsTimeZone.getTimeZone("MST");
+        auto pst = WindowsTimeZone.getTimeZone("PST");
+    }
+    canonicalZones =
+    [
+        // TODO ensure the MDT style variants prefer the daylight time version of the date
+        CanonicalZone("UTC", utc),
+        CanonicalZone("UT", utc),
+        CanonicalZone("Z", utc),
+        CanonicalZone("GMT", utc),
+        CanonicalZone("EST", est),
+        CanonicalZone("EDT", est),
+        CanonicalZone("CST", cst),
+        CanonicalZone("CDT", cst),
+        CanonicalZone("MST", mst),
+        CanonicalZone("MDT", mst),
+        CanonicalZone("PST", pst),
+        CanonicalZone("PDT", pst),
+    ];
+}
+
 bool parseInt(alias setter, int length = 2)(ref string data)
 {
     if (data.length < length)
@@ -525,7 +753,6 @@ bool parseInt(alias setter, int length = 2)(ref string data)
     try
     {
         v = c.to!int;
-
     }
     catch (ConvException e)
     {
@@ -537,6 +764,7 @@ bool parseInt(alias setter, int length = 2)(ref string data)
 
 void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
 {
+    static import std.format;
     switch (c)
     {
         case 'a':
@@ -570,6 +798,15 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
             }
             ap ~= s;
             return;
+        case 'f':
+            ap ~= std.format.format("%06d", dt.fracSecs.total!"usecs");
+            return;
+        case 'g':
+            ap ~= std.format.format("%03d", dt.fracSecs.total!"msecs");
+            return;
+        case 'G':
+            ap ~= std.format.format("%09d", dt.fracSecs.total!"nsecs");
+            return;
         case 'F':
             interpretIntoString(ap, dt, 'Y');
             ap ~= '-';
@@ -577,12 +814,6 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
             ap ~= '-';
             interpretIntoString(ap, dt, 'd');
             return;
-        case 'g':
-            // TODO what is this?
-            throw new Exception("%g not yet implemented");
-        case 'G':
-            // TODO what is this?
-            throw new Exception("%G not yet implemented");
         case 'h':
         case 'I':
             auto h = dt.hour;
@@ -686,6 +917,14 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
         case 'Y':
             ap.pad(dt.year.to!string, '0', 4);
             return;
+        case '+':
+            if (dt.utcOffset == dur!"seconds"(0))
+            {
+                ap ~= 'Z';
+                return;
+            }
+            // If it's not UTC, format as +HHMM
+            goto case;
         case 'z':
             import std.math : abs;
             auto d = dt.utcOffset;
@@ -702,13 +941,13 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
             ap.pad((minutes % 60).to!string, '0', 2);
             return;
         case 'Z':
+            if (dt.timezone is null || dt.timezone == UTC())
+            {
+                ap ~= 'Z';
+            }
             if (dt.dstInEffect)
             {
                 ap ~= dt.timezone.stdName;
-            }
-            else if (dt.timezone is null)
-            {
-                ap ~= 'Z';
             }
             else
             {
@@ -754,7 +993,100 @@ unittest
 
 unittest
 {
+    SysTime st;
+    assert(tryParse("2013-10-09T14:56:33.050-06:00", ISO8601FORMAT, st, UTC()));
+    assert(st.year == 2013);
+    assert(st.month == 10);
+    assert(st.day == 9);
+    assert(st.hour == 14, st.hour.to!string);
+    assert(st.minute == 56);
+    assert(st.second == 33);
+    assert(st.fracSecs == 50.msecs);
+    assert(st.timezone !is null);
+    assert(st.timezone != UTC());
+    assert(st.timezone.utcOffsetAt(st.stdTime) == -6.hours);
+}
+
+unittest
+{
+    import std.stdio;
+    auto dt = SysTime(
+            DateTime(2017, 5, 3, 14, 31, 57),
+            UTC());
+    auto isoishFmt = ISO8601FORMAT;
+    auto isoish = "2017-05-03T14:31:57.000000Z";
+    auto parsed = isoish.parse(isoishFmt);
+    assert(parsed.timezone !is null);
+    assert(parsed.timezone == UTC());
+    assert(parsed == dt, parsed.format(isoishFmt));
+}
+
+unittest
+{
+    import std.stdio;
+    auto dt = SysTime(
+            DateTime(2017, 5, 3, 14, 31, 57),
+            UTC()) + 10.msecs;
+    assert(dt.fracSecs == 10.msecs, "can't add dates");
+    auto isoishFmt = ISO8601FORMAT;
+    auto isoish = "2017-05-03T14:31:57.010000Z";
+    auto parsed = isoish.parse(isoishFmt);
+    assert(parsed.fracSecs == 10.msecs, "can't parse millis");
+    assert(parsed.timezone !is null);
+    assert(parsed.timezone == UTC());
+    assert(parsed == dt, parsed.format(isoishFmt));
+
+}
+
+unittest
+{
     auto formatted = "Thu, 04 Sep 2014 06:42:22 GMT";
     auto dt = parseRFC1123(formatted);
     assert(dt == SysTime(DateTime(2014, 9, 4, 6, 42, 22), UTC()), dt.toISOString());
+}
+
+unittest
+{
+    // RFC1123 dates
+    /*
+    // Uncomment to list out the generated format strings (for debugging)
+    foreach (fmt; exhaustiveDateFormat.formatOptions)
+    {
+        import std.stdio : writeln;
+        writeln(fmt);
+    }
+    */
+    void test(string date)
+    {
+        SysTime st;
+        assert(tryParse(date, RFC1123FORMAT, st, UTC()),
+                "failed to parse date " ~ date);
+        assert(st.year == 2017);
+        assert(st.month == 6);
+        assert(st.day == 11);
+        assert(st.hour == 22);
+        assert(st.minute == 15);
+        assert(st.second == 47);
+        assert(st.timezone == UTC());
+    }
+
+    // RFC1123-ish
+    test("Sun, 11 Jun 2017 22:15:47 UTC");
+    test("11 Jun 2017 22:15:47 UTC");
+    test("Sunday, 11 Jun 2017 22:15:47 UTC");
+    test("Sun, 11 June 2017 22:15:47 UTC");
+    test("11 June 2017 22:15:47 UTC");
+    test("Sunday, 11 June 2017 22:15:47 UTC");
+    test("Sun, 11 Jun 2017 22:15:47 +0000");
+    test("11 Jun 2017 22:15:47 +0000");
+    test("Sunday, 11 Jun 2017 22:15:47 +0000");
+    test("Sun, 11 June 2017 22:15:47 +0000");
+    test("11 June 2017 22:15:47 +0000");
+    test("Sunday, 11 June 2017 22:15:47 +0000");
+}
+
+unittest
+{
+    SysTime st;
+    assert(!tryParse("", RFC1123FORMAT, st, UTC()));
 }
