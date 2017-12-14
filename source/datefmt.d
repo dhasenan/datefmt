@@ -515,8 +515,13 @@ struct Interpreter
                         break;
                     }
                 }
-                auto fs = data[0..end].to!ulong;
+                auto fss = data[0..end];
                 data = data[end..$];
+                if (fss.length == 0)
+                {
+                    return false;
+                }
+                auto fs = fss.to!ulong;
                 while (end < 7)
                 {
                     end++;
