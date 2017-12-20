@@ -723,10 +723,10 @@ shared static this()
     else
     {
         auto utc = WindowsTimeZone.getTimeZone("UTC");
-        auto est = WindowsTimeZone.getTimeZone("EST");
-        auto cst = WindowsTimeZone.getTimeZone("CST");
-        auto mst = WindowsTimeZone.getTimeZone("MST");
-        auto pst = WindowsTimeZone.getTimeZone("PST");
+        auto est = WindowsTimeZone.getTimeZone("Eastern Standard Time");
+        auto cst = WindowsTimeZone.getTimeZone("Central Standard Time");
+        auto mst = WindowsTimeZone.getTimeZone("Mountain Standard Time");
+        auto pst = WindowsTimeZone.getTimeZone("Pacific Standard Time");
     }
     canonicalZones =
     [
