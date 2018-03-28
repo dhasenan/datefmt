@@ -43,6 +43,8 @@
   */
 module datefmt;
 
+@safe:
+
 import core.time;
 import std.array;
 import std.conv;
@@ -372,11 +374,13 @@ struct Interpreter
     enum AMPM { AM, PM, None };
     AMPM amPm = AMPM.None;
     Duration fracSecs;
-    immutable(TimeZone)* tz;
+
+    import std.typecons : Rebindable;
+    Rebindable!(immutable(TimeZone)) tz;
 
     Result parse(string formatString, immutable(TimeZone) defaultTimeZone)
     {
-        tz = defaultTimeZone is null ? &utc : &defaultTimeZone;
+        tz = defaultTimeZone is null ? utc : defaultTimeZone;
         bool inPercent;
         foreach (size_t i, dchar c; formatString)
         {
@@ -436,7 +440,7 @@ struct Interpreter
         }
         auto dt = SysTime(
                 DateTime(year, month, dayOfMonth, hour24, minute, second),
-                tzOffset ? new immutable SimpleTimeZone(tzOffset) : *tz);
+                tzOffset ? new immutable SimpleTimeZone(tzOffset) : tz);
         dt += fracSecs;
         return Result(dt, null, data);
     }
@@ -682,7 +686,7 @@ struct Interpreter
                 {
                     if (data.startsWith(v.name))
                     {
-                        tz = &canonicalZones[i].zone;
+                        tz = canonicalZones[i].zone;
                         break;
                     }
                 }
@@ -946,7 +950,7 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
             ap.pad((minutes % 60).to!string, '0', 2);
             return;
         case 'Z':
-            if (dt.timezone is null || dt.timezone == UTC())
+            if (dt.timezone is null || dt.timezone.isUTC())
             {
                 ap ~= 'Z';
             }
@@ -965,6 +969,11 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
         default:
             throw new Exception("format element %" ~ c ~ " not recognized");
     }
+}
+
+private bool isUTC(const TimeZone zone) @trusted
+{
+    return zone == UTC();
 }
 
 void pad(ref Appender!string ap, string s, char pad, uint length)
@@ -992,7 +1001,7 @@ unittest
     assert(isoish == "2017-05-03 14:31:57 +0000", isoish);
     auto parsed = isoish.parse(isoishFmt);
     assert(parsed.timezone !is null);
-    assert(parsed.timezone == UTC());
+    assert(parsed.timezone.isUTC());
     assert(parsed == dt, parsed.format(isoishFmt));
 }
 
@@ -1008,7 +1017,7 @@ unittest
     assert(st.second == 33);
     assert(st.fracSecs == 50.msecs);
     assert(st.timezone !is null);
-    assert(st.timezone != UTC());
+    assert(!st.timezone.isUTC());
     assert(st.timezone.utcOffsetAt(st.stdTime) == -6.hours);
 }
 
@@ -1022,7 +1031,7 @@ unittest
     auto isoish = "2017-05-03T14:31:57.000000Z";
     auto parsed = isoish.parse(isoishFmt);
     assert(parsed.timezone !is null);
-    assert(parsed.timezone == UTC());
+    assert(parsed.timezone.isUTC());
     assert(parsed == dt, parsed.format(isoishFmt));
 }
 
@@ -1038,7 +1047,7 @@ unittest
     auto parsed = isoish.parse(isoishFmt);
     assert(parsed.fracSecs == 10.msecs, "can't parse millis");
     assert(parsed.timezone !is null);
-    assert(parsed.timezone == UTC());
+    assert(parsed.timezone.isUTC());
     assert(parsed == dt, parsed.format(isoishFmt));
 
 }
@@ -1061,7 +1070,7 @@ unittest
         writeln(fmt);
     }
     */
-    void test(string date)
+    void test(string date) @safe
     {
         SysTime st;
         assert(tryParse(date, RFC1123FORMAT, st, UTC()),
@@ -1072,7 +1081,7 @@ unittest
         assert(st.hour == 22);
         assert(st.minute == 15);
         assert(st.second == 47);
-        assert(st.timezone == UTC());
+        assert(st.timezone.isUTC());
     }
 
     // RFC1123-ish
