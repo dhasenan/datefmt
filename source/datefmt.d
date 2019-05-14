@@ -367,7 +367,8 @@ struct Interpreter
     int second;
     int nanosecond;
     int weekNumber;
-    Duration tzOffset;
+    import std.typecons : Nullable;
+    Nullable!Duration tzOffset;
     string tzAbbreviation;
     string tzName;
     long epochSecond;
@@ -438,11 +439,17 @@ struct Interpreter
                 hour24 = hour12;
             }
         }
-        auto dt = SysTime(
-                DateTime(year, month, dayOfMonth, hour24, minute, second),
-                tzOffset ? new immutable SimpleTimeZone(tzOffset) : tz);
+        auto dt = SysTime(DateTime(year, month, dayOfMonth, hour24, minute, second), getTimezone);
         dt += fracSecs;
         return Result(dt, null, data);
+    }
+
+    private immutable(TimeZone) getTimezone()
+    {
+        if (tzOffset.isNull) return tz;
+        auto off = tzOffset.get;
+        if (off == 0.seconds) return UTC();
+        return new immutable SimpleTimeZone(off);
     }
 
     bool interpretFromString(dchar c)
