@@ -1014,6 +1014,23 @@ unittest
 
 unittest
 {
+    auto isoishFmt = "%Y-%m-%d %H:%M:%S %z";
+    auto parsed = "2017-05-03 14:31:57 +0000".parse(isoishFmt, new immutable SimpleTimeZone(6.hours));
+    assert(parsed.timezone !is null);
+    assert(parsed.timezone.isUTC());
+}
+
+unittest
+{
+    auto isoishFmt = "%Y-%m-%d %H:%M:%S";
+    auto parsed = "2017-05-03 14:31:57".parse(isoishFmt, new immutable SimpleTimeZone(-6.hours));
+    assert(parsed.timezone !is null);
+    assert(!parsed.timezone.isUTC());
+    assert(parsed.timezone.utcOffsetAt(parsed.stdTime) == -6.hours);
+}
+
+unittest
+{
     SysTime st;
     assert(tryParse("2013-10-09T14:56:33.050-06:00", ISO8601FORMAT, st, UTC()));
     assert(st.year == 2013);
