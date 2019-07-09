@@ -283,7 +283,7 @@ private:
 
 
 immutable(TimeZone) utc;
-static this() { utc = UTC(); }
+shared static this() { utc = UTC(); }
 
 enum weekdayNames = [
     "Sunday",
