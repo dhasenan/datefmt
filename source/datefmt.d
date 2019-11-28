@@ -790,10 +790,10 @@ void interpretIntoString(ref Appender!string ap, SysTime dt, char c)
             ap ~= weekdayNames[cast(size_t)dt.dayOfWeek];
             return;
         case 'b':
-            ap ~= monthAbbrev[cast(size_t)dt.month];
+            ap ~= monthAbbrev[cast(size_t)dt.month - 1];
             return;
         case 'B':
-            ap ~= monthNames[cast(size_t)dt.month];
+            ap ~= monthNames[cast(size_t)dt.month - 1];
             return;
         case 'C':
             ap ~= (dt.year / 100).to!string;
@@ -1127,4 +1127,12 @@ unittest
 {
     SysTime st;
     assert(!tryParse("", RFC1123FORMAT, st, UTC()));
+}
+
+unittest
+{
+    // Thanks to Ha Le at https://github.com/haqle314 for catching this
+    SysTime d1 = SysTime(DateTime(2019, 1, 1), UTC());
+    assert(d1.format("%b") == "Jan");
+    assert(d1.format("%B") == "January");
 }
