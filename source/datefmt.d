@@ -407,17 +407,17 @@ struct Interpreter
                 // TODO non-ASCII
                 auto b = data;
                 bool endedEarly = false;
-                foreach (size_t i, dchar dc; b)
+                foreach (size_t j, dchar dc; b)
                 {
-                    data = b[i..$];
-                    if (i > 0)
+                    data = b[j..$];
+                    if (j > 0)
                     {
                         endedEarly = true;
                         break;
                     }
                     if (c != dc)
                     {
-                        return Result(SysTime.init, "unexpected literal", data, formatString[i..$]);
+                        return Result(SysTime.init, "unexpected literal", data, formatString[j..$]);
                     }
                 }
                 if (!endedEarly) data = "";
