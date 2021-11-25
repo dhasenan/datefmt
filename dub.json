@@ -1,7 +1,8 @@
 {
-	"name": "datefmt",
+	"name": "datefmt-redthing1",
 	"authors": [
-		"dhasenan"
+		"dhasenan",
+		"redthing1"
 	],
 	"description": "Datetime parsing and formatting",
 	"copyright": "Copyright © 2017, dhasenan",
